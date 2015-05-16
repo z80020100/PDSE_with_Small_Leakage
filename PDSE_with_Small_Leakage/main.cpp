@@ -7,6 +7,11 @@
 #include <cstdio>
 #include <dirent.h> // Dirent API for Microsoft Visual Studio
 
+#include <cstring>
+#include <cstdio>
+#include <algorithm>
+#include <vector>
+
 #include <sha.h>
 #include <osrng.h>
 #include <hex.h>
@@ -42,6 +47,50 @@ struct partial_c1 // server can decryption this part by token
 	int l_star;
 	int id;
 };
+
+int dec_T_to_gamma(byte *esk, int esk_length, string T_path, struct encoded_data *T, struct unencoded_data *gamma); // decrypt c2 of a encoded data structure T and store to a unencoded data structure gamma
+
+/* operator overloading for struct unencoded_data */
+bool operator< (const struct unencoded_data& gamma1, const struct unencoded_data& gamma2)
+{
+	int status;
+
+	if (gamma1.l_star < gamma2.l_star)
+		return true;
+	else
+	{
+		status = strncmp(gamma1.w, gamma2.w, KEYWORD_MAX_LENGTH);
+		if (status < 0)
+			return true;
+		else if (status == 0)
+		{
+			if (gamma1.id < gamma2.id)
+				return true;
+			else if (gamma1.id == gamma2.id)
+			{
+				if (gamma1.op < gamma2.op)
+					return true;
+				else 
+					return false;
+			}
+			else
+				return false;
+		}
+		else
+			return false;
+	}
+};
+
+ostream& operator<< (ostream& out, const struct unencoded_data gamma)
+{
+	out << "l*: " << gamma.l_star << endl
+		<< "w : " << gamma.w << endl
+		<< "id: " << gamma.id << endl
+		<< "op: " << gamma.op << endl;
+
+	return out;
+};
+/* operator overloading for struct unencoded_data */
 
 string sha256(string text)
 {
@@ -267,7 +316,49 @@ void binary_search()
 
 }
 
-void dec_T_to_gamma(byte *esk, int esk_length, string T_path, struct encoded_data *T, struct unencoded_data *gamma) // decrypt c2 of a encoded data structure T and store to a unencoded data structure gamma
+int find_l_star(byte *level_key, int level_key_length, byte *esk, int esk_length, int search_level, string w, int id) // for client when op = del
+{
+	struct encoded_data T;
+	struct unencoded_data gamma;
+
+	fstream file_T;
+	string T_path;
+
+	int size_L = pow(2, search_level);
+	
+	char temp = 0; // 0: for computing hkey
+	int cnt, op = 0; // op = add, because we want find the "add" location
+	
+	string keyword_hash = sha256(w);
+	string token = CMAC_AES_128(level_key, level_key_length, keyword_hash); // token_l
+	string hkey, hex;
+
+	int dec_status;
+	
+	for (cnt = 0; cnt < size_L; cnt++)
+	{
+		hkey.assign(&temp, sizeof(temp)); // 0
+		hkey.append((char*)&op, sizeof(op)); // 0 || op
+		hkey.append((char*)&cnt, sizeof(cnt)); // 0 || op ||cnt
+		hkey = HMAC_SHA_256((byte*)token.c_str(), token.size(), hkey); // output data for creating hash table
+
+		hex = hex_encoder(hkey); // output for hash table
+		T_path = "./Server/T_" + to_string(search_level) + "[" + hex + "]"; // rename means not empty
+		cout << "Try to find: " << T_path << endl;
+
+		dec_status = dec_T_to_gamma(esk, esk_length, T_path, &T, &gamma);
+		if (dec_status == 0)
+		{
+			return gamma.l_star;
+		}
+		else
+			continue;
+	}
+
+	return -1; // not found
+}
+
+int dec_T_to_gamma(byte *esk, int esk_length, string T_path, struct encoded_data *T, struct unencoded_data *gamma) // decrypt c2 of a encoded data structure T and store to a unencoded data structure gamma
 {
 	//struct encoded_data T;
 	//struct unencoded_data gamma;
@@ -279,6 +370,7 @@ void dec_T_to_gamma(byte *esk, int esk_length, string T_path, struct encoded_dat
 	if (!file_T)
 	{
 		cerr << "Error: open " << T_path << " failed..." << endl;
+		return -1;
 	}
 	else
 	{
@@ -289,12 +381,16 @@ void dec_T_to_gamma(byte *esk, int esk_length, string T_path, struct encoded_dat
 		c2.assign(T->c2, 64); // c2 is 64 bytes
 		recoved_string = AES_128_ECB_dec(esk, esk_length, c2);
 		string_to_byte((byte*)gamma, recoved_string, sizeof(unencoded_data));
-
-		printf("%d\n", gamma->l_star);
-		printf("%s\n", gamma->w);
-		printf("%d\n", gamma->id);
-		printf("%d\n", gamma->op);
-		printf("%d\n", gamma->cnt);
+		
+		printf("************\n");
+		printf("old l* = %d\n", gamma->l_star);
+		printf("keyword = %s\n", gamma->w);
+		printf("id = %d\n", gamma->id);
+		printf("op = %d\n", gamma->op);
+		printf("old cnt = %d\n", gamma->cnt);
+		printf("************\n");
+		
+		return 0; // decrypt successfully
 	}
 }
 
@@ -465,7 +561,13 @@ class PDSE
 				gamma.l_star = level;
 			else if (op == 1) // for delete, find the corrsponding "add" document-keyword pair in which level l from server
 			{
-				// 只要往上層找，因為如果add在下層，那舊的add和新的delete會被一到同一層，然後抵銷 (simple_rebuild處理)
+				// 只要往上層找，因為如果add在下層，那舊的add和新的delete會被移到同一層，然後抵銷 (simple_rebuild處理)
+				gamma.l_star = find_l_star(k[level + 1], KEY_LENGTH, esk, KEY_LENGTH, level + 1, w, id); // for client when op = del
+				if (gamma.l_star == -1) // not found "add" in server
+				{
+					cerr << "Erroe: cannot delete because the corrsponding document-keyword pair is not added" << endl;
+					return;
+				}
 			}
 			
 			strncpy(gamma.w, w.c_str(), w.size());
@@ -537,7 +639,6 @@ class PDSE
 
 		void simple_rebuild(int level, string keyword, int id, int op)
 		{
-			fstream T_file;
 			string T_path;
 			
 			string dir_path = "./Server";
@@ -584,32 +685,14 @@ class PDSE
 							//printf("File: %s\n", ep->d_name); // file name
 							T_path = dir_path + "/" + ep->d_name;
 							cout << "Open: " << T_path << endl;
-							T_file.open(T_path, ios::in | ios::binary);
-							if (!T_file)
-								cerr << "Error: open " << T_path << " failed..." << endl;
-							else
-							{
-								T_file.read((char*)&T, sizeof(encoded_data));
-								T_file.close();
 
+							if (dec_T_to_gamma(esk, KEY_LENGTH, T_path, &T, &gamma[gamma_index]) == 0) // decrypt encoded data successfully and store to unencoded data structure gamma
+							{
 								free_name = dir_path + "/" + compare_name + "[" + to_string(level_index) + "]";
 								rename(T_path.c_str(), free_name.c_str()); // free the file by rename to origional name
-
-								/* Dectypt c2 and store on unencoded_data */
-								temp_c2.assign(T.c2, 64); // T.c2 is char
-								recoved_string = AES_128_ECB_dec(esk, KEY_LENGTH, temp_c2); // 72 bytes
-
-								string_to_byte((byte*)&gamma[gamma_index], recoved_string, sizeof(unencoded_data));
-
-								printf("l* = %d\n", gamma[gamma_index].l_star);
-								printf("w = %s\n", gamma[gamma_index].w);
-								printf("id = %d\n", gamma[gamma_index].id);
-								printf("op = %d\n", gamma[gamma_index].op);
-								printf("cnt = %d\n", gamma[gamma_index].cnt);
-								/* Dectypt c2 and store on unencoded_data */
-
-								gamma_index++;
-								level_index++;
+								
+								gamma_index++; // for stode to next gamma
+								level_index++; // for read next level
 							}
 						}
 					}
