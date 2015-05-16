@@ -562,11 +562,14 @@ class PDSE
 			else if (op == 1) // for delete, find the corrsponding "add" document-keyword pair in which level l from server
 			{
 				// 只要往上層找，因為如果add在下層，那舊的add和新的delete會被移到同一層，然後抵銷 (simple_rebuild處理)
-				gamma.l_star = find_l_star(k[level + 1], KEY_LENGTH, esk, KEY_LENGTH, level + 1, w, id); // for client when op = del
-				if (gamma.l_star == -1) // not found "add" in server
+				for (int i = level + 1; i <= L; i++)
 				{
-					cerr << "Erroe: cannot delete because the corrsponding document-keyword pair is not added" << endl;
-					return;
+					gamma.l_star = find_l_star(k[i], KEY_LENGTH, esk, KEY_LENGTH, i, w, id); // for client when op = del
+					if (gamma.l_star == -1) // not found "add" in server
+					{
+						cerr << "Erroe: cannot delete because the corrsponding document-keyword pair is not added" << endl;
+						return;
+					}
 				}
 			}
 			
@@ -701,13 +704,45 @@ class PDSE
 				closedir(dp);
 				/* Read all download entry to RAM and decryption */
 
-				/* Store new entry to the last location in gamma */
+				/* Store new entry to the last location in gamma except l_star*/
 				strncpy(gamma[size_L - 1].w, keyword.c_str(), keyword.size());
 				gamma[size_L - 1].id = id;
 				gamma[size_L - 1].op = op;
-				/* Store new entry to the last location in gamma */
+				/* Store new entry to the last location in gamma except l_star*/
+
+				/* Find l_star for new entry */
+				if (op == 0)
+					gamma[size_L - 1].l_star = level;
+				else
+				{
+					for (int i = level + 1; i <= L; i++)
+					{
+						gamma[size_L - 1].l_star = find_l_star(k[i], KEY_LENGTH, esk, KEY_LENGTH, i, keyword, id); // for client when op = del
+						if (gamma[size_L - 1].l_star == -1) // not found "add" in higher level, search on lower level
+						{
+							for (int i = 0; i < size_L - 1; i++) // not found the last location
+							{
+								if (gamma[i].id == gamma[size_L - 1].id)
+									if (strncmp(gamma[i].w, gamma[size_L - 1].w, KEYWORD_MAX_LENGTH) == 0)
+										if (gamma[i].op == 0)
+											gamma[size_L - 1].l_star = gamma[i].l_star;
+							}
+						}
+						if (gamma[size_L - 1].l_star == -1)
+						{
+							cerr << "Erroe: cannot delete because the corrsponding document-keyword pair is not added" << endl;
+							return;
+						}
+					}
+				}
+				/* Find l_star for new entry */
 
 				/* Sorting T and gamma by l_star, w, id, op */
+				cout << "Before sorting: " << endl;
+				for (int i = 0; i < size_L; i++)
+				{
+					cout << gamma[i] << endl;
+				}
 				/* Sorting T and gamma by l_star, w, id, op */
 
 				/* Upload each entry to server */
