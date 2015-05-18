@@ -33,7 +33,7 @@ struct unencoded_data // gamma_L in client
 	char w[KEYWORD_MAX_LENGTH]; // keyword
 	int id; // file ID
 	int op; // add: 0, del: 1
-	int cnt; // counter for a keyword w
+	int cnt; // counter for a keyword for a level
 };
 
 struct encoded_data //T_l in server
@@ -51,13 +51,13 @@ struct partial_c1 // server can decryption this part by token
 int dec_T_to_gamma(byte *esk, int esk_length, string T_path, struct encoded_data *T, struct unencoded_data *gamma); // decrypt c2 of a encoded data structure T and store to a unencoded data structure gamma
 
 /* operator overloading for struct unencoded_data */
-bool operator< (const struct unencoded_data& gamma1, const struct unencoded_data& gamma2)
+bool compart_gamma (const struct unencoded_data gamma1, const struct unencoded_data gamma2) // if(gamma1 < gamma2) { return true; }
 {
 	int status;
 
 	if (gamma1.l_star < gamma2.l_star)
 		return true;
-	else
+	else if (gamma1.l_star == gamma2.l_star)
 	{
 		status = strncmp(gamma1.w, gamma2.w, KEYWORD_MAX_LENGTH);
 		if (status < 0)
@@ -70,7 +70,7 @@ bool operator< (const struct unencoded_data& gamma1, const struct unencoded_data
 			{
 				if (gamma1.op < gamma2.op)
 					return true;
-				else 
+				else
 					return false;
 			}
 			else
@@ -79,6 +79,8 @@ bool operator< (const struct unencoded_data& gamma1, const struct unencoded_data
 		else
 			return false;
 	}
+	else
+		return false;
 };
 
 ostream& operator<< (ostream& out, const struct unencoded_data gamma)
@@ -339,7 +341,7 @@ int find_l_star(byte *level_key, int level_key_length, byte *esk, int esk_length
 	{
 		hkey.assign(&temp, sizeof(temp)); // 0
 		hkey.append((char*)&op, sizeof(op)); // 0 || op
-		hkey.append((char*)&cnt, sizeof(cnt)); // 0 || op ||cnt
+		hkey.append((char*)&cnt, sizeof(cnt)); // 0 || op || cnt
 		hkey = HMAC_SHA_256((byte*)token.c_str(), token.size(), hkey); // output data for creating hash table
 
 		hex = hex_encoder(hkey); // output for hash table
@@ -565,11 +567,13 @@ class PDSE
 				for (int i = level + 1; i <= L; i++)
 				{
 					gamma.l_star = find_l_star(k[i], KEY_LENGTH, esk, KEY_LENGTH, i, w, id); // for client when op = del
-					if (gamma.l_star == -1) // not found "add" in server
-					{
-						cerr << "Erroe: cannot delete because the corrsponding document-keyword pair is not added" << endl;
-						return;
-					}
+					if (gamma.l_star != -1)
+						break; // found correct l*
+				}
+				if (gamma.l_star == -1) // not found "add" in server
+				{
+					cerr << "Erroe: cannot delete because the corrsponding document-keyword pair is not added" << endl;
+					return;
 				}
 			}
 			
@@ -656,6 +660,7 @@ class PDSE
 
 			struct encoded_data T;
 			struct unencoded_data *gamma;
+			vector<struct unencoded_data> gamma_v; // for sorting
 			string recoved_string, temp_c2, temp_keyword;
 
 			int gamma_index = 0; // the index for gamma
@@ -713,19 +718,19 @@ class PDSE
 				/* Find l_star for new entry */
 				if (op == 0)
 					gamma[size_L - 1].l_star = level;
-				else
+				else if (op == 1)
 				{
 					for (int i = level + 1; i <= L; i++)
 					{
 						gamma[size_L - 1].l_star = find_l_star(k[i], KEY_LENGTH, esk, KEY_LENGTH, i, keyword, id); // for client when op = del
 						if (gamma[size_L - 1].l_star == -1) // not found "add" in higher level, search on lower level
 						{
-							for (int i = 0; i < size_L - 1; i++) // not found the last location
+							for (int i = 0; i < size_L - 1; i++) // do not find the last location
 							{
 								if (gamma[i].id == gamma[size_L - 1].id)
 									if (strncmp(gamma[i].w, gamma[size_L - 1].w, KEYWORD_MAX_LENGTH) == 0)
 										if (gamma[i].op == 0)
-											gamma[size_L - 1].l_star = gamma[i].l_star;
+											gamma[size_L - 1].l_star = level;
 							}
 						}
 						if (gamma[size_L - 1].l_star == -1)
@@ -741,16 +746,50 @@ class PDSE
 				cout << "Before sorting: " << endl;
 				for (int i = 0; i < size_L; i++)
 				{
+					if (gamma[i].op == 0) // re-computing l_star for op = add
+						gamma[i].l_star = level;
+					else if (gamma[i].op == 1) // re-computing l_star for op = delete because the corrsppnding "add" also is moved to this level
+					{
+						if (gamma[i].l_star < level)
+							gamma[i].l_star = level;
+					}
+
 					cout << gamma[i] << endl;
+					gamma_v.push_back(gamma[i]);
+				}
+				
+				sort(gamma_v.begin(), gamma_v.end(), compart_gamma); // sorting
+
+				cout << "After sorting: " << endl;
+				for (int i = 0; i < gamma_v.size(); i++)
+				{
+					cout << gamma_v[i] << endl;
 				}
 				/* Sorting T and gamma by l_star, w, id, op */
 
-				/* Upload each entry to server */
-				for (int i = 0; i < size_L; i++)
+				/* Cancel add and delete operation */
+				for (int i = 0; i < gamma_v.size() - 1; i++)
 				{
-					//gamma[i].cnt = i; // recount cnt for each level
-					temp_keyword.assign(gamma[i].w);
-					encode_entry(level, i, temp_keyword, gamma[i].id, gamma[i].op, i);
+					if (gamma_v[i].op == 0 && gamma_v[i + 1].op == 1)
+					{
+						if (gamma_v[i].id == gamma_v[i + 1].id && strncmp(gamma_v[i].w, gamma_v[i + 1].w, KEYWORD_MAX_LENGTH) == 0)
+						{
+							cout << "Delete (keyword = " << gamma_v[i].w << ", ID = " << gamma_v[i].id << ")" << endl;
+							gamma_v.erase(gamma_v.begin() + i);
+							gamma_v.erase(gamma_v.begin() + i); // After delete the ith element, original (i+1) element becomes ith element
+							i--;
+							if (gamma_v.size() == 0)
+								break;
+						}
+					}
+				}
+				/* Cancel add and delete operation */
+
+				/* Upload each entry to server */
+				for (int i = 0; i < gamma_v.size(); i++)
+				{
+					temp_keyword.assign(gamma_v[i].w); // transform char to string
+					encode_entry(level, i, temp_keyword, gamma_v[i].id, gamma_v[i].op, i);
 				}
 				/* Upload each entry to server */
 			}
