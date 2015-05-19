@@ -455,9 +455,60 @@ class PDSE
 				simple_rebuild(free_level, keyword, id, op);
 		}
 
-		void search()
+		void search(string keyword)
 		{
+			string *token_array = new string[L + 1];
+			int op, size_L, id;
+			vector<int> id_v;
+			
+			cout << "**** Client generate token for each level ****" << endl;
+			for (int level = 0; level <= L; level++)
+			{
+				token_array[level] = client_token_gen(level, keyword);
+			}
 
+			cout << "**** Servers Search for \"add\" by token ****" << endl;
+			op = 0;
+			for (int level = 0; level <= L; level++)
+			{
+				size_L = pow(2, level);
+				for (int cnt = 0; cnt < size_L; cnt++)
+				{
+					id = server_lookup(token_array[level], level, op, cnt);
+					if (id != -1)
+					{
+						id_v.push_back(id);
+					}
+				}
+			}
+			cout << endl;
+
+			cout << "**** Servers Search for \"delete\" by token ****" << endl;
+			op = 1;
+			for (int level = 0; level <= L; level++)
+			{
+				size_L = pow(2, level);
+				for (int cnt = 0; cnt < size_L; cnt++)
+				{
+					id = server_lookup(token_array[level], level, op, cnt);
+					if (id != -1)
+					{
+						id_v.push_back(id);
+					}
+				}
+			}
+			cout << endl;
+						
+			delete[] token_array;
+
+			sort(id_v.begin(), id_v.end());
+
+			cout << "Search result: file ID = ";
+			for (int i = 0; i < id_v.size(); i++)
+			{
+				cout << id_v[i] << ", ";
+			}
+			cout << endl;
 		}
 	
 	private:
@@ -549,6 +600,62 @@ class PDSE
 				}
 				cout << endl;
 			}
+		}
+
+		string client_token_gen(int level, string keyword) // a level, a token
+		{
+			string keyword_hash = sha256(keyword);
+			string token_l = CMAC_AES_128(k[level], KEY_LENGTH, keyword_hash);
+			return token_l;
+		}
+
+		int server_lookup(string token_l, int level, int op, int cnt)
+		{
+			string hkey, hex, temp_key;
+			char temp = 0; // 0: for computing hkey
+
+			fstream T_file;
+			string lookup_path;
+
+			struct partial_c1 C1;
+			char *ptr;
+
+			int id = -1;
+
+			hkey.assign(&temp, sizeof(temp));
+			hkey.append((char*)&op, sizeof(op));
+			hkey.append((char*)&cnt, sizeof(cnt));
+			hkey = HMAC_SHA_256((byte*)token_l.c_str(), token_l.size(), hkey);
+
+			hex = hex_encoder(hkey);
+			lookup_path = "./Server/T_" + to_string(level) + "[" + hex + "]";
+			cout << "Open " << lookup_path << endl;
+			T_file.open(lookup_path, ios::in | ios::binary);
+			if (!T_file)
+				cerr << "Not found..." << endl;
+			else
+			{
+				T_file.read((char*)&C1, sizeof(C1));
+				T_file.close();
+				
+				temp = 1; // 1: for computing temp_key
+				temp_key.assign(&temp, sizeof(temp));
+				temp_key.append((char*)&op, sizeof(op));
+				temp_key.append((char*)&cnt, sizeof(cnt));
+				temp_key = HMAC_SHA_256((byte*)token_l.c_str(), token_l.size(), temp_key);
+
+				ptr = (char*)&C1;
+				for (int i = 0; i < sizeof(C1); i++)
+				{
+					ptr[i] = ptr[i] ^ temp_key[i];
+				}
+
+				//cout << "l* = " << C1.l_star << endl;
+				//cout << "id = " << C1.id << endl;
+				id = C1.id;
+			}
+
+			return id;
 		}
 
 		void encode_entry(int level, int index, string w, int id, int op, int cnt) // w: keyword, index: for a level
@@ -650,6 +757,20 @@ class PDSE
 			struct encoded_data dec_test_T;
 			struct unencoded_data dec_test_gamma;
 			dec_T_to_gamma(esk, KEY_LENGTH, new_name, &dec_test_T, &dec_test_gamma);
+			*/
+
+			/*
+			struct partial_c1 C1;
+			cout << "Size of C1 = " << sizeof(C1) << endl;
+			file_T.open(new_name, ios::in | ios::binary);
+			file_T.read((char*)&C1, sizeof(C1));
+			char *C1_ptr = (char*)&C1;
+			for (int i = 0; i < sizeof(C1); i++)
+			{
+				C1_ptr[i] = C1_ptr[i] ^ temp_key[i];
+			}
+			cout << "l* = " << C1.l_star << endl;
+			cout << "id = " << C1.id << endl;
 			*/
 		}
 
@@ -895,7 +1016,7 @@ int main()
 					break;
 				}
 				cin >> file_ID;
-				cout << "Enter the keyword includ in the corrsponding file: : " << endl << ">>";
+				cout << "Enter the keyword includ in the corrsponding file: " << endl << ">>";
 				cin >> keyword;
 				if (keyword.size() > 32)
 					cerr << "The maximum length for a keyword cannot more than 32 bytes" << endl;
@@ -905,6 +1026,9 @@ int main()
 				break;
 
 			case 1:
+				cout << "Enter the keyword you wnat to search:" << endl << ">>";
+				cin >> keyword;
+				pdse_obj.search(keyword);
 				break;
 
 			default:
