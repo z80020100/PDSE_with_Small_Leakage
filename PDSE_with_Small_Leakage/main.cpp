@@ -503,6 +503,15 @@ class PDSE
 
 			sort(id_v.begin(), id_v.end());
 
+			for (int i = 0; i < id_v.size() - 1; i++) // set add - set del
+			{
+				if (id_v[i] == id_v[i + 1])
+				{
+					id_v.erase(id_v.begin() + i);
+					id_v.erase(id_v.begin() + i);
+				}
+			}
+
 			cout << "Search result: file ID = ";
 			for (int i = 0; i < id_v.size(); i++)
 			{
@@ -577,12 +586,12 @@ class PDSE
 
 		void client_setup()
 		{
-			memset(esk, 0, KEY_LENGTH);
+			memset(esk, 'K', KEY_LENGTH);
 			cout << "Generate k_esk" << ": ";
 
 			for (int i = 0; i < KEY_LENGTH; i++) // show the key esk
 			{
-				printf("%d", esk[i]);
+				printf("%c", esk[i]);
 			}
 			cout << endl;
 
@@ -592,7 +601,7 @@ class PDSE
 			for (int i = 0; i <= L; i++)
 			{
 				k[i] = new byte[KEY_LENGTH];
-				memset(k[i], i, KEY_LENGTH);
+				memset(k[i], i+1, KEY_LENGTH);
 				cout << "Generate k_" << i << ": ";
 				for (int j = 0; j < KEY_LENGTH; j++) // show the key k_j for each level i
 				{
