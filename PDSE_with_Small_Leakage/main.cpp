@@ -11,6 +11,8 @@
 #include <cstdio>
 #include <algorithm>
 #include <vector>
+#include <iomanip>
+#include <windows.h>
 
 #include <sha.h>
 #include <osrng.h>
@@ -20,7 +22,7 @@
 #include <modes.h>
 
 #define KEY_LENGTH 16
-#define KEYWORD_MAX_LENGTH 32
+#define MAX_KEYWORD_LENGTH 32
 
 #pragma comment(lib, "cryptlib.lib")
 
@@ -30,7 +32,7 @@ using namespace CryptoPP;
 struct unencoded_data // gamma_L in client
 {
 	int l_star; // l* 
-	char w[KEYWORD_MAX_LENGTH]; // keyword
+	char w[MAX_KEYWORD_LENGTH]; // keyword
 	int id; // file ID
 	int op; // add: 0, del: 1
 	int cnt; // counter for a keyword for a level
@@ -59,7 +61,7 @@ bool compart_gamma (const struct unencoded_data gamma1, const struct unencoded_d
 		return true;
 	else if (gamma1.l_star == gamma2.l_star)
 	{
-		status = strncmp(gamma1.w, gamma2.w, KEYWORD_MAX_LENGTH);
+		status = strncmp(gamma1.w, gamma2.w, MAX_KEYWORD_LENGTH);
 		if (status < 0)
 			return true;
 		else if (status == 0)
@@ -153,6 +155,7 @@ string HMAC_SHA_256(byte *user_key, int user_key_len, string plain)
 	catch (const CryptoPP::Exception& e)
 	{
 		cerr << e.what() << endl;
+		system("PAUSE");
 		exit(1);
 	}
 
@@ -205,6 +208,7 @@ string CMAC_AES_128(byte *user_key, int user_key_len, string plain) // user_key_
 	catch (const CryptoPP::Exception& e)
 	{
 		cerr << e.what() << endl;
+		system("PAUSE");
 		exit(1);
 	}
 
@@ -249,6 +253,7 @@ string AES_128_ECB_enc(byte *user_key, int user_key_len, string plain)
 	catch (CryptoPP::Exception& e)
 	{
 		cerr << e.what() << endl;
+		system("PAUSE");
 		exit(1);
 	}
 
@@ -291,6 +296,7 @@ string AES_128_ECB_dec(byte *user_key, int user_key_len, string cipher)
 	catch (CryptoPP::Exception& e)
 	{
 		cerr << e.what() << endl;
+		system("PAUSE");
 		exit(1);
 	}
 
@@ -313,9 +319,14 @@ inline string hex_encoder(string raw)  // encode raw data to hex string data for
 	return hex;
 }
 
-void binary_search()
+inline wstring s2ws(const std::string& s)
 {
-
+	int len;
+	int slength = (int)s.length() + 1;
+	len = MultiByteToWideChar(CP_ACP, 0, s.c_str(), slength, 0, 0);
+	std::wstring r(len, L'\0');
+	MultiByteToWideChar(CP_ACP, 0, s.c_str(), slength, &r[0], len);
+	return r;
 }
 
 int find_l_star(byte *level_key, int level_key_length, byte *esk, int esk_length, int search_level, string w, int id) // for client when op = del
@@ -391,6 +402,7 @@ int dec_T_to_gamma(byte *esk, int esk_length, string T_path, struct encoded_data
 		recoved_string = AES_128_ECB_dec(esk, esk_length, c2);
 		string_to_byte((byte*)gamma, recoved_string, sizeof(unencoded_data));
 		
+		/*
 		printf("************\n");
 		printf("old l* = %d\n", gamma->l_star);
 		printf("keyword = %s\n", gamma->w);
@@ -398,6 +410,7 @@ int dec_T_to_gamma(byte *esk, int esk_length, string T_path, struct encoded_data
 		printf("op = %d\n", gamma->op);
 		printf("old cnt = %d\n", gamma->cnt);
 		printf("************\n");
+		*/
 		
 		return 0; // decrypt successfully
 	}
@@ -407,10 +420,9 @@ class PDSE
 {
 	public:
 		
-		void setup()
+		void setup(int pair_number)
 		{
-			cout << "Please enter the the number of document-keyword pairs:" << endl << ">>";
-			cin >> N;
+			N = pair_number;
 			cout << "**** Server Message ****" << endl;
 			server_setup();
 			cout << endl;
@@ -424,9 +436,9 @@ class PDSE
 			fstream file_T;
 			string T_path;
 			
-			cout << "**** Download the first entry for each level from server ****" << endl; // just show a message
+			//cout << "**** Download the first entry for each level from server ****" << endl; // just show a message
 			/* Check which level is empty */
-			cout << "**** Check which level is empty ****" << endl;
+			//cout << "**** Check which level is empty ****" << endl;
 			for (int i = 0; i <= L; i++)
 			{
 				T_path = "./Server/T_" + to_string(i) + "[" + to_string(0) + "]"; // check the first entry for each level
@@ -434,7 +446,7 @@ class PDSE
 				file_T.open(T_path, ios::in | ios::binary); // Can open the file means free because encode_entry() will rename the level files
 				if (!file_T)
 				{
-					cout << "Level " << i <<" is occupied" << endl;
+					//cout << "Level " << i <<" is occupied" << endl;
 					free_level = -1;
 				}
 				else
@@ -448,7 +460,10 @@ class PDSE
 			/* Check which level is empty */
 			
 			if (free_level < 0)
+			{
 				cerr << "Error: the server has been full!" << endl;
+				return;
+			}
 			else if (free_level == 0)
 				encode_entry(free_level, 0, keyword, id, op, 0); // for level, the index and cnt must be 0
 			else
@@ -501,23 +516,30 @@ class PDSE
 						
 			delete[] token_array;
 
-			sort(id_v.begin(), id_v.end());
-
-			for (int i = 0; i < id_v.size() - 1; i++) // set add - set del
+			if (id_v.size() > 0)
 			{
-				if (id_v[i] == id_v[i + 1])
+				sort(id_v.begin(), id_v.end());
+
+				for (int i = 0; i < id_v.size() - 1; i++) // set add - set del
 				{
-					id_v.erase(id_v.begin() + i);
-					id_v.erase(id_v.begin() + i);
+					if (id_v.at(i) == id_v.at(i + 1))
+					{
+						id_v.erase(id_v.begin() + i);
+						id_v.erase(id_v.begin() + i);
+					}
 				}
-			}
 
-			cout << "Search result: file ID = ";
-			for (int i = 0; i < id_v.size(); i++)
-			{
-				cout << id_v[i] << ", ";
+				cout << "Search result: file ID = ";
+				for (int i = 0; i < id_v.size(); i++)
+				{
+					cout << id_v.at(i) << ", ";
+				}
+				cout << endl;
 			}
-			cout << endl;
+			else
+			{
+				cout << "Search result: Not found!" << endl;
+			}
 		}
 	
 	private:
@@ -531,7 +553,18 @@ class PDSE
 						
 		void server_setup()
 		{
+			fstream log_file;
+			string log_path = "./setup_setup_log.txt";
+			log_file.open(log_path, ios::out | ios::app);
+			if (!log_file)
+				cerr << "Error: create log file " << log_path << " failed..." << endl;
+
+			cout << "Number of pairs: " << N << endl;
+			log_file << "Number of pairs: " << N << endl;
+
 			L = log2(N); // count the maximum level
+			cout << "Prepare " << L << " levels" << endl;
+			log_file << "Prepare " << L << " levels" << endl;
 
 			int size_L; // size of the level
 			int memory_usage = 0; // count the memory usuage in server
@@ -543,7 +576,7 @@ class PDSE
 			fstream T_file;
 			string T_path;
 
-			cout << "Maximum level: " << L << endl;
+			//cout << "Maximum level: " << L << endl;
 
 			/*
 			for (int i = 0; i < L + 1; i++) // locating every T for each level really
@@ -561,7 +594,8 @@ class PDSE
 			{
 				size_L = pow(2, i);
 				cout << "Level " << i << " has the size: " << size_L << endl;
-				memory_usage = memory_usage + sizeof(struct encoded_data)*size_L;
+				log_file << "Level " << i << " has the size: " << size_L << endl;
+				//memory_usage = memory_usage + sizeof(struct encoded_data)*size_L;
 				
 				for (int j = 0; j < size_L; j++) // for the index in a level
 				{
@@ -570,30 +604,42 @@ class PDSE
 					if (!T_file)
 					{
 						cerr << "Error: create " << T_path << " failed..." << endl;
-						exit(1);
+						log_file << "Error: create " << T_path << " failed..." << endl;
+						system("PAUSE");
+						return;
 					}
 					else
 					{
 						T_file.write((char*)&T, sizeof(struct encoded_data));
-						cout << "Output file: " << T_path << endl;
+						//cout << "Output file: " << T_path << endl;
+						//log_file << "Output file: " << T_path << endl;
 						T_file.close();
 					}						
 				}
-				cout << endl;
+				//cout << endl;
 			}
-			cout << "Memory usages: " << memory_usage << " bytes" << endl;
+			//cout << "Memory usages: " << memory_usage << " bytes" << endl;
 		}
 
 		void client_setup()
 		{
+			fstream log_file;
+			string log_path = "./client_setup_log.txt";
+			log_file.open(log_path, ios::out | ios::app);
+			if (!log_file)
+				cerr << "Error: create log file " << log_path << " failed..." << endl;
+
 			memset(esk, 'K', KEY_LENGTH);
-			cout << "Generate k_esk" << ": ";
+			//cout << "Generate k_esk" << ": ";
+			log_file << "Generate k_esk" << ": ";
 
 			for (int i = 0; i < KEY_LENGTH; i++) // show the key esk
 			{
-				printf("%c", esk[i]);
+				//printf("%c", esk[i]);
+				log_file << esk[i];
 			}
-			cout << endl;
+			//cout << endl;
+			log_file << endl;
 
 
 			k = new byte*[L + 1];
@@ -602,12 +648,15 @@ class PDSE
 			{
 				k[i] = new byte[KEY_LENGTH];
 				memset(k[i], i+1, KEY_LENGTH);
-				cout << "Generate k_" << i << ": ";
+				//cout << "Generate k_" << i << ": ";
+				log_file << "Generate k_" << i << ": ";
 				for (int j = 0; j < KEY_LENGTH; j++) // show the key k_j for each level i
 				{
-					printf("%d", k[i][j]);
+					//printf("%d", k[i][j]);
+					log_file << k[i][j];
 				}
-				cout << endl;
+				//cout << endl;
+				log_file << endl;
 			}
 		}
 
@@ -737,7 +786,7 @@ class PDSE
 
 			string c2; // output data, only client can decrypt by key esk
 			c2.assign((char*)&gamma.l_star, sizeof(gamma.l_star));
-			c2.append(gamma.w, KEYWORD_MAX_LENGTH);
+			c2.append(gamma.w, MAX_KEYWORD_LENGTH);
 			c2.append((char*)&gamma.id, sizeof(gamma.id));
 			c2.append((char*)&gamma.op, sizeof(gamma.op));
 			c2.append((char*)&gamma.cnt, sizeof(gamma.cnt));
@@ -752,7 +801,7 @@ class PDSE
 			}
 			else
 			{
-				cout << "Write encrypted data to " << T_path << endl;
+				//cout << "Write encrypted data to " << T_path << endl;
 				file_T.write(c1.c_str(), c1.size());
 				file_T.write(c2.c_str(), c2.size());
 				file_T.close();
@@ -787,7 +836,7 @@ class PDSE
 		{
 			string T_path;
 			
-			string dir_path = "./Server";
+			string dir_path = "./Server/";
 			DIR *dp;
 			struct dirent *ep;
 
@@ -798,7 +847,7 @@ class PDSE
 			int size_L = pow(2, level);
 
 			struct encoded_data T;
-			struct unencoded_data *gamma;
+			struct unencoded_data gamma;
 			vector<struct unencoded_data> gamma_v; // for sorting
 			string recoved_string, temp_c2, temp_keyword;
 
@@ -808,36 +857,23 @@ class PDSE
 			//cout << "**** Prepare " << size_L - 1 << " encoded entry ****" << endl;
 			//T = new struct encoded_data[size_L - 1];
 
-			cout << "**** Prepare " << size_L << " unencoded entry ****" << endl;
-			gamma = new struct unencoded_data[size_L];
-			memset(gamma, 0, sizeof(struct unencoded_data) * size_L);
+			//cout << "**** Prepare " << size_L << " unencoded entry ****" << endl;
+			//gamma = new struct unencoded_data[size_L];
+			memset(&gamma, 0, sizeof(struct unencoded_data));
 
 			/* Find l_star for new entry */
 			if (op == 0)
-				gamma[size_L - 1].l_star = level;
+				gamma.l_star = level;
 			else if (op == 1)
 			{
 				for (int i = 0; i <= L; i++) // search ALL level
 				{
-					gamma[size_L - 1].l_star = find_l_star(k[i], KEY_LENGTH, esk, KEY_LENGTH, i, keyword, id); // for client when op = del
-					if (gamma[size_L - 1].l_star != -1)
+					gamma.l_star = find_l_star(k[i], KEY_LENGTH, esk, KEY_LENGTH, i, keyword, id); // for client when op = del
+					if (gamma.l_star != -1)
 						break;
 				}
 
-				/*
-				if (gamma[size_L - 1].l_star == -1) // not found "add" in higher level, search on lower level
-				{
-					for (int i = 0; i < size_L - 1; i++) // do not find the last location
-					{
-						if (gamma[i].id == gamma[size_L - 1].id)
-							if (strncmp(gamma[i].w, gamma[size_L - 1].w, KEYWORD_MAX_LENGTH) == 0)
-								if (gamma[i].op == 0)
-									gamma[size_L - 1].l_star = level;
-					}
-				}
-				*/
-
-				if (gamma[size_L - 1].l_star == -1)
+				if (gamma.l_star == -1)
 				{
 					cerr << "Erroe: cannot delete because the corrsponding document-keyword pair is not added" << endl;
 					return;
@@ -845,7 +881,15 @@ class PDSE
 			}
 			/* Find l_star for new entry */
 
-			cout << "**** Download ALL encoded entry in server which level is lower than " << level << " ****" << endl;
+			/* Store new entry to the last location in gamma except l_star*/
+			strncpy(gamma.w, keyword.c_str(), keyword.size());
+			gamma.id = id;
+			gamma.op = op;
+			/* Store new entry to the last location in gamma except l_star*/
+
+			gamma_v.push_back(gamma);// push new entry to vector
+
+			//cout << "**** Download ALL encoded entry in server which level is lower than " << level << " ****" << endl;
 			
 			/* Read all download entry to RAM and decryption */
 			dp = opendir(dir_path.c_str());
@@ -853,8 +897,9 @@ class PDSE
 			{
 				for (int i = 0; i < level; i++)
 				{
-					cout << "Download encoded entry in level " << i << endl;
-					compare_name = "T_" + to_string(i);
+					//cout << "Download encoded entry in level " << i << endl;
+					//compare_name = "T_" + to_string(i); // old
+					compare_name = "T_" + to_string(i) + "["; // new version
 					level_index = 0;
 					
 					while (ep = readdir(dp))
@@ -863,17 +908,19 @@ class PDSE
 						if (file_name.find(compare_name, 0) == 0) // find all entry for level i
 						{
 							//printf("File: %s\n", ep->d_name); // file name
-							T_path = dir_path + "/" + ep->d_name;
-							cout << "Open: " << T_path << endl;
+							T_path = dir_path + ep->d_name;
+							//cout << "Open: " << T_path << endl;
 
-							if (dec_T_to_gamma(esk, KEY_LENGTH, T_path, &T, &gamma[gamma_index]) == 0) // decrypt encoded data successfully and store to unencoded data structure gamma
+							if (dec_T_to_gamma(esk, KEY_LENGTH, T_path, &T, &gamma) == 0) // decrypt encoded data successfully and store to unencoded data structure gamma
 							{
-								free_name = dir_path + "/" + compare_name + "[" + to_string(level_index) + "]";
+								//free_name = dir_path + "/" + compare_name + "[" + to_string(level_index) + "]"; // old
+								free_name = dir_path + compare_name + to_string(level_index) + "]"; //new version
 								rename(T_path.c_str(), free_name.c_str()); // free the file by rename to origional name
 								
 								gamma_index++; // for stode to next gamma
 								level_index++; // for read next level
 							}
+							gamma_v.push_back(gamma);
 						}
 					}
 					rewinddir(dp);
@@ -881,26 +928,20 @@ class PDSE
 				closedir(dp);
 				/* Read all download entry to RAM and decryption */
 
-				/* Store new entry to the last location in gamma except l_star*/
-				strncpy(gamma[size_L - 1].w, keyword.c_str(), keyword.size());
-				gamma[size_L - 1].id = id;
-				gamma[size_L - 1].op = op;
-				/* Store new entry to the last location in gamma except l_star*/
-
 				/* Sorting T and gamma by l_star, w, id, op */
 				cout << "Before sorting: " << endl;
 				for (int i = 0; i < size_L; i++)
 				{
-					if (gamma[i].op == 0) // re-computing l_star for op = add
-						gamma[i].l_star = level;
-					else if (gamma[i].op == 1) // re-computing l_star for op = delete because the corrsppnding "add" also is moved to this level
+					if (gamma_v.at(i).op == 0) // re-computing l_star for op = add
+						gamma_v.at(i).l_star = level;
+					else if (gamma_v.at(i).op == 1) // re-computing l_star for op = delete because the corrsppnding "add" also is moved to this level
 					{
-						if (gamma[i].l_star < level)
-							gamma[i].l_star = level;
+						if (gamma_v.at(i).l_star < level)
+							gamma_v.at(i).l_star = level;
 					}
 
-					cout << gamma[i] << endl;
-					gamma_v.push_back(gamma[i]);
+					cout << gamma_v.at(i) << endl;
+					//gamma_v.push_back(gamma[i]);
 				}
 				
 				sort(gamma_v.begin(), gamma_v.end(), compart_gamma); // sorting
@@ -908,30 +949,30 @@ class PDSE
 				cout << "After sorting: " << endl;
 				for (int i = 0; i < gamma_v.size(); i++)
 				{
-					cout << gamma_v[i] << endl;
+					cout << gamma_v.at(i) << endl;
 				}
 				/* Sorting T and gamma by l_star, w, id, op */
 
 				/* Cancel add and delete operation with dummy */
 				for (int i = 0; i < gamma_v.size() - 1; i++)
 				{
-					if (gamma_v[i].op == 0 && gamma_v[i + 1].op == 1)
+					if (gamma_v.at(i).op == 0 && gamma_v.at(i+1).op == 1)
 					{
-						if (gamma_v[i].id == gamma_v[i + 1].id && strncmp(gamma_v[i].w, gamma_v[i + 1].w, KEYWORD_MAX_LENGTH) == 0)
+						if (gamma_v.at(i).id == gamma_v.at(i+1).id && strncmp(gamma_v.at(i).w, gamma_v.at(i+1).w, MAX_KEYWORD_LENGTH) == 0)
 						{
-							cout << "Cancel (keyword = " << gamma_v[i].w << ", ID = " << gamma_v[i].id << ")" << endl;
+							cout << "Cancel (keyword = " << gamma_v.at(i).w << ", ID = " << gamma_v.at(i).id << ")" << endl;
 							
-							gamma_v[i].l_star = L + 1;
-							memset(gamma_v[i].w, 0, KEYWORD_MAX_LENGTH);
-							gamma_v[i].id = -1;
-							gamma_v[i].op = -1;
-							gamma_v[i].cnt = -1;
+							gamma_v.at(i).l_star = L + 1;
+							memset(gamma_v.at(i).w, 0, MAX_KEYWORD_LENGTH);
+							gamma_v.at(i).id = -1;
+							gamma_v.at(i).op = -1;
+							gamma_v.at(i).cnt = -1;
 
-							gamma_v[i+1].l_star = L + 1;
-							memset(gamma_v[i+1].w, 0, KEYWORD_MAX_LENGTH);
-							gamma_v[i+1].id = -1;
-							gamma_v[i+1].op = -1;
-							gamma_v[i+1].cnt = -1;
+							gamma_v.at(i+1).l_star = L + 1;
+							memset(gamma_v.at(i+1).w, 0, MAX_KEYWORD_LENGTH);
+							gamma_v.at(i+1).id = -1;
+							gamma_v.at(i+1).op = -1;
+							gamma_v.at(i+1).cnt = -1;
 							i++;
 
 							//gamma_v.erase(gamma_v.begin() + i);
@@ -942,12 +983,14 @@ class PDSE
 						}
 					}
 				}
-				cout << "After canceling and sorting: " << endl;
+				//cout << "After canceling and sorting: " << endl;
 				sort(gamma_v.begin(), gamma_v.end(), compart_gamma); // sorting
+				/*
 				for (int i = 0; i < gamma_v.size(); i++)
 				{
-					cout << gamma_v[i] << endl;
+					cout << gamma_v.at(i) << endl;
 				}
+				*/
 				/* Cancel add and delete operation with dummy */
 
 				/* Upload each entry to server */
@@ -958,20 +1001,17 @@ class PDSE
 						cnt = 0;
 					else
 					{
-						if (strncmp(gamma_v[i - 1].w, gamma_v[i].w, KEYWORD_MAX_LENGTH) != 0)
+						if (strncmp(gamma_v[i - 1].w, gamma_v.at(i).w, MAX_KEYWORD_LENGTH) != 0)
 							cnt = 0;
 					}
 					
-					gamma_v[i].cnt = cnt;
-					temp_keyword.assign(gamma_v[i].w); // transform char to string
-					encode_entry(level, i, temp_keyword, gamma_v[i].id, gamma_v[i].op, gamma_v[i].cnt);
+					gamma_v.at(i).cnt = cnt;
+					temp_keyword.assign(gamma_v.at(i).w); // transform char to string
+					encode_entry(level, i, temp_keyword, gamma_v.at(i).id, gamma_v.at(i).op, gamma_v.at(i).cnt);
 					cnt++;
 				}
 				/* Upload each entry to server */
 			}
-
-			//delete[](T);
-			delete[](gamma);
 		}
 
 		void process_level()
@@ -992,42 +1032,47 @@ class PDSE
 
 int main()
 {
+	fstream log_file;
+	log_file.open("./PDSE_Log_.txt", ios::out);
+
+	LARGE_INTEGER startTime, endTime, fre;
+	double times;
+
 	int opcode, update_op;
 	
 	string keyword;
-	int file_ID;
+	int file_ID, pair_number;
 	
 	PDSE pdse_obj;
-	cout << "**** System setup ****" << endl;
-	pdse_obj.setup();
+
+	string list_path = "./Client/List/Forward_Index.list";
+	wstring w_list_path = s2ws(list_path); // for mapping index file to memory 
 	
 	cout << endl << "Enter OP code:" << endl;
-	cout << "	0: Update" << endl;
-	cout << "	1: Search" << endl;
+	cout << "	0: Add a pair" << endl;
+	cout << "	1: Delete a pair" << endl;
+	cout << "	2: Search" << endl;
+	cout << "	3: Build from list" << endl;
+	cout << "	9: Setup system" << endl;
 	cout << "	Ctrl + Z: Exit" << endl;
 	cout << ">>";
 	while (cin >> opcode)
 	{
+		QueryPerformanceFrequency(&fre); // 取得CPU頻率
+		QueryPerformanceCounter(&startTime); // 取得開機到現在經過幾個CPU Cycle
+		/* Program to Timing */
 		switch (opcode)
 		{
 			case 0:
-				cout << "Which operation you want to do? " << endl;
-				cout << "	Enter \"0\" to add a file" << endl;
-				cout << "	Enter \"1\" to delete a file" << endl << ">>";
-				cin >> update_op;
-				if (update_op == 0)
-					cout << "Enter the file ID you want to add: " << endl << ">>";
-				else if (update_op == 1)
-					cout << "Enter the file ID you want to delete: " << endl << ">>";
-				else
-				{
-					cerr << "Error: update opcode is incorrect..." << endl;
-					break;
-				}
+				//cout << "Which operation you want to do? " << endl;
+				//cout << "	Enter \"0\" to add a file" << endl;
+				//cout << "	Enter \"1\" to delete a file" << endl << ">>";
+				update_op = 0;
+				cout << "Enter the file ID you want to add: " << endl << ">>";
 				cin >> file_ID;
 				cout << "Enter the keyword includ in the corrsponding file: " << endl << ">>";
 				cin >> keyword;
-				if (keyword.size() > 32)
+				if (keyword.size() > MAX_KEYWORD_LENGTH)
 					cerr << "The maximum length for a keyword cannot more than 32 bytes" << endl;
 				else
 					pdse_obj.update(keyword, file_ID, update_op);
@@ -1035,22 +1080,175 @@ int main()
 				break;
 
 			case 1:
+				update_op = 1;
+				cout << "Enter the file ID you want to delete: " << endl << ">>";
+				cin >> file_ID;
+				cout << "Enter the keyword includ in the corrsponding file: " << endl << ">>";
+				cin >> keyword;
+				if (keyword.size() > MAX_KEYWORD_LENGTH)
+					cerr << "The maximum length for a keyword cannot more than 32 bytes" << endl;
+				else
+					pdse_obj.update(keyword, file_ID, update_op);
+
+				break;
+
+			case 2:
 				cout << "Enter the keyword you wnat to search:" << endl << ">>";
 				cin >> keyword;
+				log_file << "Server search operation" << endl;
 				pdse_obj.search(keyword);
 				break;
+
+			case 3:
+			{
+				/* Mapping Index File to Memory */
+
+				// 打開文件 for list index
+				HANDLE list_fileH = CreateFile(w_list_path.c_str(),
+					GENERIC_READ | GENERIC_WRITE,
+					FILE_SHARE_READ,
+					NULL,
+					OPEN_EXISTING,
+					FILE_ATTRIBUTE_NORMAL,
+					NULL);
+				if (list_fileH == INVALID_HANDLE_VALUE)
+				{
+					cerr << "Error: CreateFile() for " << list_path << endl;
+					system("PAUSE");
+					return -1;
+				}
+				else
+				{
+					cout << "Open file: " << list_path << endl;
+				}
+				int list_size = GetFileSize(list_fileH, NULL); // get the file size
+
+				// 創建文件映射內核對象
+				HANDLE list_mapFileH = CreateFileMapping(list_fileH,
+					NULL,
+					PAGE_READWRITE,
+					0,
+					0,
+					NULL);
+				if (list_mapFileH == NULL)
+				{
+					cerr << "Error: CreateFileMapping() for " << list_path << endl;
+					system("PAUSE");
+					return -1;
+				}
+
+				// 將文件數據映射到進程地址空間
+				char *list_mapH = (char *)MapViewOfFile(list_mapFileH,
+					FILE_MAP_ALL_ACCESS,
+					0,
+					0,
+					0);
+				if (list_mapH == NULL)
+				{
+					cerr << "Error: MapViewOfFile() for " << list_path << endl;
+					system("PAUSE");
+					return -1;
+				}
+
+				// 設定存取指標
+				char *list_ptr = list_mapH;
+				/*
+				for (int i = 0; i < list_size; i++)
+				{
+					cout << list_ptr[i];
+				}
+				*/
+				/* Mapping Index File to Memory */
+
+				string buf, file_ID, keyword;
+				int buf_head = 0, buf_end, buf_size;
+				int keyword_head, keyword_end;
+				int ID;
+
+				for (int i = 0; i < list_size; i++)
+				{
+					//cout << list_ptr[i];
+					if (list_ptr[i] == '\n') // buf裡的內容相當於getline得到的內容
+					{
+						buf_end = i;
+						buf.assign(list_ptr + buf_head, buf_end - buf_head);
+						buf_head = i + 1;
+						//cout << buf << endl; // show the content in buf
+						buf_size = buf.size();
+
+						for (int j = 0; j < buf_size; j++)
+						{
+							if (buf[j] == ':') // read file ID from list
+							{
+								file_ID.assign(buf.c_str(), j);
+								//cout << file_ID << endl; // show the file ID
+								ID = atoi(file_ID.c_str());
+								keyword_head = j + 1;
+
+								for (int k = keyword_head; k < buf_size; k++) // read keyword from list
+								{
+									if (buf[k] == 32) // 32 is SPACE in ASCII
+									{
+										keyword_end = k;
+										keyword.assign(buf.c_str() + keyword_head, keyword_end - keyword_head);
+										keyword_head = keyword_end + 1;
+										//cout << keyword << endl; // show the keyword
+
+										/* code above can get each keyword and store at string keyword */
+
+										if (keyword.size() <= MAX_KEYWORD_LENGTH)
+										{
+											update_op = 0; // add
+											pdse_obj.update(keyword, ID, update_op);
+										}
+										else
+										{
+											cout << "Skip " << keyword << endl;
+											log_file << "Skip " << keyword << endl;
+										}
+									}
+								}
+								break; // break after found ':' 
+							}
+						}
+					}
+				}
+								
+				// close file mapping
+
+				UnmapViewOfFile(list_mapH);
+				CloseHandle(list_mapFileH);
+				CloseHandle(list_fileH);
+			} // case 3 end
+				break;
+
+			case 9:
+				cout << "**** System setup ****" << endl;
+				log_file << "**** System setup ****" << endl;
+				cout << "Please enter the the number of document-keyword pairs:" << endl << ">>";
+				cin >> pair_number;
+				pdse_obj.setup(pair_number);
 
 			default:
 				cout << "Opcode is incorrect..." << endl;
 		}
+		/* Program to Timing */
+		QueryPerformanceCounter(&endTime); // 取得開機到程式執行完成經過幾個CPU Cycle
+		times = ((double)endTime.QuadPart - (double)startTime.QuadPart) / fre.QuadPart;
+		log_file << "Build operation" << endl;
+		cout << fixed << setprecision(3) << "Processing time: " << times << 's' << endl << endl;
+		log_file << fixed << setprecision(3) << "Processing time: " << times << 's' << endl << endl;
 
 		cout << endl << "Enter OP code:" << endl;
-		cout << "	0: Update" << endl;
-		cout << "	1: Search" << endl;
+		cout << "	0: Add a pair" << endl;
+		cout << "	1: Delete a pair" << endl;
+		cout << "	2: Search" << endl;
+		cout << "	3: Build from list" << endl;
+		cout << "	9: Setup system" << endl;
 		cout << "	Ctrl + Z: Exit" << endl;
 		cout << ">>";
 	}
-
+	log_file.close();
 	system("PAUSE");
 	return 0;
 }
