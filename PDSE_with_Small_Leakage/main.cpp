@@ -23,13 +23,21 @@
 
 #define KEY_LENGTH 16
 #define MAX_KEYWORD_LENGTH 32
+#define CIPHER_1_LENGTH 8
+#define CIPHER_2_LENGTH 64
 
 #pragma comment(lib, "cryptlib.lib")
 
 using namespace std;
 using namespace CryptoPP;
 
-struct unencoded_data // gamma_L in client
+struct hash_header
+{
+	char hash[32];
+	int index;
+};
+
+struct unencoded_data // gamma_L in client, the length = CIPHER_2_LENGTH
 {
 	int l_star; // l* 
 	char w[MAX_KEYWORD_LENGTH]; // keyword
@@ -40,11 +48,11 @@ struct unencoded_data // gamma_L in client
 
 struct encoded_data //T_l in server
 {
-	char c1[8]; // encrypt file ID and l_star by XOR, the size of cipher is 8 bytes;
-	char c2[64]; // encrypt l_star, keyword w, file ID, OP code, counter by AES_128_ECB, the size of cipher is 64 bytes
+	char c1[CIPHER_1_LENGTH]; // encrypt file ID and l_star by XOR, the size of cipher is 8 bytes;
+	char c2[CIPHER_2_LENGTH]; // encrypt l_star, keyword w, file ID, OP code, counter by AES_128_ECB, the size of cipher is 64 bytes
 };
 
-struct partial_c1 // server can decryption this part by token
+struct partial_c1 // server can decryption this part by token, the length = CHIPHER_1_LENGTH
 {
 	int l_star;
 	int id;
@@ -329,7 +337,7 @@ inline wstring s2ws(const std::string& s)
 	return r;
 }
 
-int find_l_star(byte *level_key, int level_key_length, byte *esk, int esk_length, int search_level, string w, int id) // for client when op = del
+int find_l_star(byte *level_key, int level_key_length, byte *esk, int esk_length, int search_level, string w, int id) // for client when op = del, find the corrsponding add pair
 {
 	struct encoded_data T;
 	struct unencoded_data gamma;
@@ -348,7 +356,7 @@ int find_l_star(byte *level_key, int level_key_length, byte *esk, int esk_length
 
 	int dec_status;
 	
-	cout << "**** Start to find l* for new entry in level " << search_level << " ****" << endl;
+	cout << "**** Find l* for new entry in level " << search_level << " ****" << endl;
 
 	for (cnt = 0; cnt < size_L; cnt++)
 	{
@@ -368,8 +376,6 @@ int find_l_star(byte *level_key, int level_key_length, byte *esk, int esk_length
 			cout << "****  Find l* end ****" << endl;
 			return gamma.l_star;
 		}
-		else
-			continue;
 	}
 	gamma.l_star = -1;
 	
@@ -386,7 +392,7 @@ int dec_T_to_gamma(byte *esk, int esk_length, string T_path, struct encoded_data
 
 	string recoved_string, c2;
 
-	file_T.open(T_path, ios::out | ios::in | ios::binary);
+	file_T.open(T_path, ios::in | ios::binary);
 	if (!file_T)
 	{
 		cerr << "Error: open " << T_path << " failed..." << endl;
@@ -402,7 +408,7 @@ int dec_T_to_gamma(byte *esk, int esk_length, string T_path, struct encoded_data
 		recoved_string = AES_128_ECB_dec(esk, esk_length, c2);
 		string_to_byte((byte*)gamma, recoved_string, sizeof(unencoded_data));
 		
-		/*
+		/* Show the decryption result 
 		printf("************\n");
 		printf("old l* = %d\n", gamma->l_star);
 		printf("keyword = %s\n", gamma->w);
@@ -410,7 +416,7 @@ int dec_T_to_gamma(byte *esk, int esk_length, string T_path, struct encoded_data
 		printf("op = %d\n", gamma->op);
 		printf("old cnt = %d\n", gamma->cnt);
 		printf("************\n");
-		*/
+		/* Show the decryption result */
 		
 		return 0; // decrypt successfully
 	}
@@ -419,6 +425,14 @@ int dec_T_to_gamma(byte *esk, int esk_length, string T_path, struct encoded_data
 class PDSE
 {
 	public:
+
+		void set(int pair_number)
+		{
+			N = pair_number;
+			L = log2(N);
+
+			client_setup();
+		}
 		
 		void setup(int pair_number)
 		{
@@ -430,19 +444,19 @@ class PDSE
 			client_setup();
 		}
 
-		void update(string keyword, int id, int op)
+		int update(string keyword, int id, int op) // execute successfully return 0, server full return -1
 		{
 			int free_level = -1;
 			fstream file_T;
 			string T_path;
-			
+
 			//cout << "**** Download the first entry for each level from server ****" << endl; // just show a message
 			/* Check which level is empty */
 			//cout << "**** Check which level is empty ****" << endl;
 			for (int i = 0; i <= L; i++)
 			{
 				T_path = "./Server/T_" + to_string(i) + "[" + to_string(0) + "]"; // check the first entry for each level
-				cout << "Try to find empty entry: " << T_path << endl;
+				//cout << "Try to find empty entry: " << T_path << endl;
 				file_T.open(T_path, ios::in | ios::binary); // Can open the file means free because encode_entry() will rename the level files
 				if (!file_T)
 				{
@@ -451,23 +465,29 @@ class PDSE
 				}
 				else
 				{
-					cout << "Level " << i << " is free!" << endl;
+					//cout << "Level " << i << " is free!" << endl;
 					free_level = i;
 					file_T.close();
 					break;
 				}
 			}
 			/* Check which level is empty */
-			
+
 			if (free_level < 0)
 			{
 				cerr << "Error: the server has been full!" << endl;
-				return;
+				return -1;
 			}
 			else if (free_level == 0)
+			{
 				encode_entry(free_level, 0, keyword, id, op, 0); // for level, the index and cnt must be 0
+				return 0;
+			}
 			else
+			{
 				simple_rebuild(free_level, keyword, id, op);
+				return 0;
+			}
 		}
 
 		void search(string keyword)
@@ -475,6 +495,7 @@ class PDSE
 			string *token_array = new string[L + 1];
 			int op, size_L, id;
 			vector<int> id_v;
+			int size_v;
 			
 			cout << "**** Client generate token for each level ****" << endl;
 			for (int level = 0; level <= L; level++)
@@ -516,25 +537,35 @@ class PDSE
 						
 			delete[] token_array;
 
-			if (id_v.size() > 0)
+			size_v = id_v.size();
+
+			if (size_v > 0)
 			{
 				sort(id_v.begin(), id_v.end());
 
-				for (int i = 0; i < id_v.size() - 1; i++) // set add - set del
+				for (int i = 0; i < size_v - 1; i++) // set add - set del
 				{
 					if (id_v.at(i) == id_v.at(i + 1))
 					{
 						id_v.erase(id_v.begin() + i);
 						id_v.erase(id_v.begin() + i);
+						size_v = id_v.size();
 					}
 				}
 
-				cout << "Search result: file ID = ";
-				for (int i = 0; i < id_v.size(); i++)
+				if (size_v > 0)
 				{
-					cout << id_v.at(i) << ", ";
+					cout << "Search result: file ID = ";
+					for (int i = 0; i < id_v.size(); i++)
+					{
+						cout << id_v.at(i) << ", ";
+					}
+					cout << endl;
 				}
-				cout << endl;
+				else
+				{
+					cout << "Search result: Not found!" << endl;
+				}
 			}
 			else
 			{
@@ -550,6 +581,76 @@ class PDSE
 		byte esk[KEY_LENGTH]; // key esk for encrypt c2
 		byte **k; // key for each level for encrypt c1
 		
+		void server_setup_single()
+		{
+			fstream log_file;
+			string log_path = "./setup_setup_log.txt";
+			log_file.open(log_path, ios::out | ios::app);
+			if (!log_file)
+				cerr << "Error: create log file " << log_path << " failed..." << endl;
+
+			struct hash_header hash_table;
+
+			cout << "Number of pairs: " << N << endl;
+			log_file << "Number of pairs: " << N << endl;
+
+			L = log2(N); // count the maximum level
+			cout << "Prepare " << L << " levels" << endl;
+			log_file << "Prepare " << L << " levels" << endl;
+
+			int size_L; // size of the level
+			//int memory_usage = 0; // count the memory usuage in server
+			struct encoded_data T; // the encoded data structure store in server. Using a free T, instead of locating every T for each level to save memory
+			//struct encoded_data **T; // for locating every T for each level
+			//T = new struct encoded_data*[L + 1];
+			memset(&T, -1, sizeof(struct encoded_data));
+
+			fstream T_file;
+			string T_path;
+
+			//cout << "Maximum level: " << L << endl;
+
+
+			for (int i = 0; i <= L; i++) // output free T to server, for each level
+			{
+				memset(&hash_table, 0, sizeof(struct hash_header));
+				size_L = pow(2, i);
+				cout << "Level " << i << " has the size: " << size_L << endl;
+				log_file << "Level " << i << " has the size: " << size_L << endl;
+				//memory_usage = memory_usage + sizeof(struct encoded_data)*size_L;
+				T_path = "./Server/T_" + to_string(i);
+				T_file.open(T_path, ios::out | ios::binary);
+				if (!T_file)
+				{
+					cerr << "Error: create " << T_path << " failed..." << endl;
+					log_file << "Error: create " << T_path << " failed..." << endl;
+					system("PAUSE");
+					return;
+				}
+				else
+				{
+					for (int k = 0; k < size_L; k++)
+					{
+						hash_table.index = sizeof(struct hash_header) * size_L + sizeof(struct encoded_data) * k;
+						//cout << "hash_index = " << hash_table.index << endl;
+						T_file.write((char*)&hash_table, sizeof(struct hash_header));
+					}
+
+
+					for (int j = 0; j < size_L; j++) // for the index in a level
+					{
+						T_file.write((char*)&T, sizeof(struct encoded_data));
+						//cout << "Output file: " << T_path << endl;
+						//log_file << "Output file: " << T_path << endl;
+					}
+					T_file.close();
+				}
+				//cout << endl;
+			}
+			//cout << "Memory usages: " << memory_usage << " bytes" << endl;
+		}
+
+
 						
 		void server_setup()
 		{
@@ -567,7 +668,7 @@ class PDSE
 			log_file << "Prepare " << L << " levels" << endl;
 
 			int size_L; // size of the level
-			int memory_usage = 0; // count the memory usuage in server
+			//int memory_usage = 0; // count the memory usuage in server
 			struct encoded_data T; // the encoded data structure store in server. Using a free T, instead of locating every T for each level to save memory
 			//struct encoded_data **T; // for locating every T for each level
 			//T = new struct encoded_data*[L + 1];
@@ -664,7 +765,7 @@ class PDSE
 		{
 			string keyword_hash = sha256(keyword);
 			string token_l = CMAC_AES_128(k[level], KEY_LENGTH, keyword_hash);
-			return token_l;
+			return token_l; // token size = 16 bytes
 		}
 
 		int server_lookup(string token_l, int level, int op, int cnt)
@@ -718,7 +819,7 @@ class PDSE
 
 		void encode_entry(int level, int index, string w, int id, int op, int cnt) // w: keyword, index: for a level
 		{
-			cout << "**** Encode entry store to index " << index << " of the level " << level <<" ****" << endl;
+			//cout << "**** Encode entry store to index " << index << " of the level " << level <<" ****" << endl;
 
 			struct unencoded_data gamma; // create a unencoded data structure to save the document-keyword pair
 			memset(&gamma, 0, sizeof(gamma));
@@ -793,7 +894,7 @@ class PDSE
 			c2 = AES_128_ECB_enc(esk, KEY_LENGTH, c2);
 
 			T_path = "./Server/T_" + to_string(level) + "[" +  to_string(index) + "]";
-			cout << "Open: " << T_path << endl;
+			//cout << "Open: " << T_path << endl;
 			file_T.open(T_path, ios::out | ios::in | ios::binary);
 			if (!file_T)
 			{
@@ -806,8 +907,12 @@ class PDSE
 				file_T.write(c2.c_str(), c2.size());
 				file_T.close();
 				
-				cout << "Rename " << T_path << " to " << new_name << endl;
-				rename(T_path.c_str(), new_name.c_str());
+				//cout << "Rename " << T_path << " to " << new_name << endl;
+				int result = rename(T_path.c_str(), new_name.c_str());
+				if (result != 0)
+				{
+					cerr << "Error: rename " << T_path << " to " << new_name << endl;
+				}
 			}
 
 			/*
@@ -848,17 +953,11 @@ class PDSE
 
 			struct encoded_data T;
 			struct unencoded_data gamma;
-			vector<struct unencoded_data> gamma_v; // for sorting
+			vector<struct unencoded_data> gamma_v;
 			string recoved_string, temp_c2, temp_keyword;
 
-			int gamma_index = 0; // the index for gamma
 			int level_index = 0; // the index for each lvele 
 
-			//cout << "**** Prepare " << size_L - 1 << " encoded entry ****" << endl;
-			//T = new struct encoded_data[size_L - 1];
-
-			//cout << "**** Prepare " << size_L << " unencoded entry ****" << endl;
-			//gamma = new struct unencoded_data[size_L];
 			memset(&gamma, 0, sizeof(struct unencoded_data));
 
 			/* Find l_star for new entry */
@@ -881,13 +980,13 @@ class PDSE
 			}
 			/* Find l_star for new entry */
 
-			/* Store new entry to the last location in gamma except l_star*/
+			/* Store new entry to the last location in gamma except l_star */
 			strncpy(gamma.w, keyword.c_str(), keyword.size());
 			gamma.id = id;
 			gamma.op = op;
-			/* Store new entry to the last location in gamma except l_star*/
+			/* Store new entry to the last location in gamma except l_star */
 
-			gamma_v.push_back(gamma);// push new entry to vector
+			gamma_v.push_back(gamma); // push new entry to vector
 
 			//cout << "**** Download ALL encoded entry in server which level is lower than " << level << " ****" << endl;
 			
@@ -917,7 +1016,6 @@ class PDSE
 								free_name = dir_path + compare_name + to_string(level_index) + "]"; //new version
 								rename(T_path.c_str(), free_name.c_str()); // free the file by rename to origional name
 								
-								gamma_index++; // for stode to next gamma
 								level_index++; // for read next level
 							}
 							gamma_v.push_back(gamma);
@@ -929,8 +1027,8 @@ class PDSE
 				/* Read all download entry to RAM and decryption */
 
 				/* Sorting T and gamma by l_star, w, id, op */
-				cout << "Before sorting: " << endl;
-				for (int i = 0; i < size_L; i++)
+				//cout << "Before sorting: " << endl;
+				for (int i = 0; i < size_L; i++) // seting l_star for each entry
 				{
 					if (gamma_v.at(i).op == 0) // re-computing l_star for op = add
 						gamma_v.at(i).l_star = level;
@@ -940,17 +1038,18 @@ class PDSE
 							gamma_v.at(i).l_star = level;
 					}
 
-					cout << gamma_v.at(i) << endl;
-					//gamma_v.push_back(gamma[i]);
+					//cout << gamma_v.at(i) << endl;
 				}
 				
 				sort(gamma_v.begin(), gamma_v.end(), compart_gamma); // sorting
 
-				cout << "After sorting: " << endl;
+				//cout << "After sorting: " << endl;
+				/*
 				for (int i = 0; i < gamma_v.size(); i++)
 				{
 					cout << gamma_v.at(i) << endl;
 				}
+				*/
 				/* Sorting T and gamma by l_star, w, id, op */
 
 				/* Cancel add and delete operation with dummy */
@@ -1053,6 +1152,7 @@ int main()
 	cout << "	1: Delete a pair" << endl;
 	cout << "	2: Search" << endl;
 	cout << "	3: Build from list" << endl;
+	cout << "	8: Set N and L" << endl;
 	cout << "	9: Setup system" << endl;
 	cout << "	Ctrl + Z: Exit" << endl;
 	cout << ">>";
@@ -1222,12 +1322,22 @@ int main()
 			} // case 3 end
 				break;
 
+			case 8:
+				cout << "**** Set N and L ****" << endl;
+				log_file << "**** Set N and L ****" << endl;
+				cout << "Please enter the the number of document-keyword pairs:" << endl << ">>";
+				cin >> pair_number;
+				pdse_obj.set(pair_number);
+				break;
+
+
 			case 9:
 				cout << "**** System setup ****" << endl;
 				log_file << "**** System setup ****" << endl;
 				cout << "Please enter the the number of document-keyword pairs:" << endl << ">>";
 				cin >> pair_number;
 				pdse_obj.setup(pair_number);
+				break;
 
 			default:
 				cout << "Opcode is incorrect..." << endl;
@@ -1244,6 +1354,7 @@ int main()
 		cout << "	1: Delete a pair" << endl;
 		cout << "	2: Search" << endl;
 		cout << "	3: Build from list" << endl;
+		cout << "	8: Set N and L" << endl;
 		cout << "	9: Setup system" << endl;
 		cout << "	Ctrl + Z: Exit" << endl;
 		cout << ">>";
