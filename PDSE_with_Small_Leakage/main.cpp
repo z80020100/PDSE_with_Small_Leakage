@@ -492,9 +492,16 @@ class PDSE
 
 		void search(string keyword)
 		{
+			fstream log_file;
+			string log_path = "./PDSE_Search_Result.txt";
+			log_file.open(log_path, ios::out | ios::app);
+			if (!log_file)
+				cerr << "Error: create log file " << log_path << " failed..." << endl;
+			
 			string *token_array = new string[L + 1];
 			int op, size_L, id;
-			vector<int> id_v;
+			vector<int> id_v_add, id_v_del, id_v_symmetric_difference;
+			std::vector<int>::iterator it;
 			int size_v;
 			
 			cout << "**** Client generate token for each level ****" << endl;
@@ -513,7 +520,7 @@ class PDSE
 					id = server_lookup(token_array[level], level, op, cnt);
 					if (id != -1)
 					{
-						id_v.push_back(id);
+						id_v_add.push_back(id);
 					}
 				}
 			}
@@ -529,7 +536,7 @@ class PDSE
 					id = server_lookup(token_array[level], level, op, cnt);
 					if (id != -1)
 					{
-						id_v.push_back(id);
+						id_v_del.push_back(id);
 					}
 				}
 			}
@@ -537,40 +544,68 @@ class PDSE
 						
 			delete[] token_array;
 
-			size_v = id_v.size();
-
-			if (size_v > 0)
+			sort(id_v_add.begin(), id_v_add.end());
+			sort(id_v_del.begin(), id_v_del.end());
+			
+			if (id_v_add.size() != 0 && id_v_del.size() != 0)
 			{
-				sort(id_v.begin(), id_v.end());
-
-				for (int i = 0; i < size_v - 1; i++) // set add - set del
-				{
-					if (id_v.at(i) == id_v.at(i + 1))
-					{
-						id_v.erase(id_v.begin() + i);
-						id_v.erase(id_v.begin() + i);
-						size_v = id_v.size();
-					}
-				}
+				set_symmetric_difference(id_v_add.begin(), id_v_add.end(),
+					id_v_del.begin(), id_v_del.end(),
+					insert_iterator < vector <int> > (id_v_symmetric_difference, id_v_symmetric_difference.begin()));
+				size_v = id_v_symmetric_difference.size();
 
 				if (size_v > 0)
 				{
 					cout << "Search result: file ID = ";
-					for (int i = 0; i < id_v.size(); i++)
+					log_file << "Search result: file ID = ";
+					for (int i = 0; i < size_v; i++)
 					{
-						cout << id_v.at(i) << ", ";
+						cout << id_v_symmetric_difference.at(i) << ", ";
+						log_file << id_v_symmetric_difference.at(i) << ", ";
 					}
 					cout << endl;
+					log_file << endl;
 				}
 				else
 				{
 					cout << "Search result: Not found!" << endl;
+					log_file << "Search result: Not found!" << endl;
 				}
+			}
+			else if (id_v_add.size() > 0 && id_v_del.size() == 0)
+			{
+				size_v = id_v_add.size();
+
+				if (size_v > 0)
+				{
+					cout << "Search result: file ID = ";
+					log_file << "Search result: file ID = ";
+					for (int i = 0; i < size_v; i++)
+					{
+						cout << id_v_add.at(i) << ", ";
+						log_file << id_v_add.at(i) << ", ";
+					}
+					cout << endl;
+					log_file << endl;
+				}
+				else
+				{
+					cout << "Search result: Not found!" << endl;
+					log_file << "Search result: Not found!" << endl;
+				}
+			}
+			else if (id_v_add.size() == 0 && id_v_del.size() == 0)
+			{
+				cout << "Search result: Not found!" << endl;
+				log_file << "Search result: Not found!" << endl;
 			}
 			else
 			{
-				cout << "Search result: Not found!" << endl;
+				cerr << "Error: datebase erro" << endl;
+				log_file << "Error: datebase erro" << endl;
 			}
+			
+			log_file.close();
 		}
 	
 	private:
@@ -788,10 +823,12 @@ class PDSE
 
 			hex = hex_encoder(hkey);
 			lookup_path = "./Server/T_" + to_string(level) + "[" + hex + "]";
-			cout << "Open " << lookup_path << endl;
+			//cout << "Open " << lookup_path << endl;
 			T_file.open(lookup_path, ios::in | ios::binary);
 			if (!T_file)
-				cerr << "Not found..." << endl;
+			{
+				//cerr << "Not found..." << endl;
+			}
 			else
 			{
 				T_file.read((char*)&C1, sizeof(C1));
@@ -1152,6 +1189,7 @@ int main()
 	cout << "	1: Delete a pair" << endl;
 	cout << "	2: Search" << endl;
 	cout << "	3: Build from list" << endl;
+	cout << "	4: Delete a file" << endl;
 	cout << "	8: Set N and L" << endl;
 	cout << "	9: Setup system" << endl;
 	cout << "	Ctrl + Z: Exit" << endl;
@@ -1195,7 +1233,7 @@ int main()
 			case 2:
 				cout << "Enter the keyword you wnat to search:" << endl << ">>";
 				cin >> keyword;
-				log_file << "Server search operation" << endl;
+				log_file << "Server search operation for " << keyword << endl;
 				pdse_obj.search(keyword);
 				break;
 
@@ -1322,6 +1360,134 @@ int main()
 			} // case 3 end
 				break;
 
+			case 4:
+			{
+				cout << "Enter the file ID you want to delete: " << endl << ">>";
+				cin >> file_ID;
+
+				/* Mapping Index File to Memory */
+
+				// 打開文件 for list index
+				HANDLE list_fileH = CreateFile(w_list_path.c_str(),
+					GENERIC_READ | GENERIC_WRITE,
+					FILE_SHARE_READ,
+					NULL,
+					OPEN_EXISTING,
+					FILE_ATTRIBUTE_NORMAL,
+					NULL);
+				if (list_fileH == INVALID_HANDLE_VALUE)
+				{
+					cerr << "Error: CreateFile() for " << list_path << endl;
+					system("PAUSE");
+					return -1;
+				}
+				else
+				{
+					cout << "Open file: " << list_path << endl;
+				}
+				int list_size = GetFileSize(list_fileH, NULL); // get the file size
+
+				// 創建文件映射內核對象
+				HANDLE list_mapFileH = CreateFileMapping(list_fileH,
+					NULL,
+					PAGE_READWRITE,
+					0,
+					0,
+					NULL);
+				if (list_mapFileH == NULL)
+				{
+					cerr << "Error: CreateFileMapping() for " << list_path << endl;
+					system("PAUSE");
+					return -1;
+				}
+
+				// 將文件數據映射到進程地址空間
+				char *list_mapH = (char *)MapViewOfFile(list_mapFileH,
+					FILE_MAP_ALL_ACCESS,
+					0,
+					0,
+					0);
+				if (list_mapH == NULL)
+				{
+					cerr << "Error: MapViewOfFile() for " << list_path << endl;
+					system("PAUSE");
+					return -1;
+				}
+
+				// 設定存取指標
+				char *list_ptr = list_mapH;
+				/*
+				for (int i = 0; i < list_size; i++)
+				{
+				cout << list_ptr[i];
+				}
+				*/
+				/* Mapping Index File to Memory */
+
+				string buf, file_ID_str, keyword;
+				int buf_head = 0, buf_end, buf_size;
+				int keyword_head, keyword_end;
+				int ID;
+
+				for (int i = 0; i < list_size; i++)
+				{
+					//cout << list_ptr[i];
+					if (list_ptr[i] == '\n') // buf裡的內容相當於getline得到的內容
+					{
+						buf_end = i;
+						buf.assign(list_ptr + buf_head, buf_end - buf_head);
+						buf_head = i + 1;
+						//cout << buf << endl; // show the content in buf
+						buf_size = buf.size();
+
+						for (int j = 0; j < buf_size; j++)
+						{
+							if (buf[j] == ':') // read file ID from list
+							{
+								file_ID_str.assign(buf.c_str(), j);
+								//cout << file_ID << endl; // show the file ID
+								ID = atoi(file_ID_str.c_str());
+								keyword_head = j + 1;
+								if (ID == file_ID)
+								{
+									for (int k = keyword_head; k < buf_size; k++) // read keyword from list
+									{
+										if (buf[k] == 32) // 32 is SPACE in ASCII
+										{
+											keyword_end = k;
+											keyword.assign(buf.c_str() + keyword_head, keyword_end - keyword_head);
+											keyword_head = keyword_end + 1;
+											//cout << keyword << endl; // show the keyword
+
+											/* code above can get each keyword and store at string keyword */
+
+											if (keyword.size() <= MAX_KEYWORD_LENGTH)
+											{
+												update_op = 1; // delete
+												pdse_obj.update(keyword, ID, update_op);
+											}
+											else
+											{
+												cout << "Skip " << keyword << endl;
+												log_file << "Skip " << keyword << endl;
+											}
+										}
+									}
+								}
+								break; // break after found ':' 
+							}
+						}
+					}
+				}
+
+				// close file mapping
+
+				UnmapViewOfFile(list_mapH);
+				CloseHandle(list_mapFileH);
+				CloseHandle(list_fileH);
+			} // case 3 end
+			break;
+
 			case 8:
 				cout << "**** Set N and L ****" << endl;
 				log_file << "**** Set N and L ****" << endl;
@@ -1345,7 +1511,6 @@ int main()
 		/* Program to Timing */
 		QueryPerformanceCounter(&endTime); // 取得開機到程式執行完成經過幾個CPU Cycle
 		times = ((double)endTime.QuadPart - (double)startTime.QuadPart) / fre.QuadPart;
-		log_file << "Build operation" << endl;
 		cout << fixed << setprecision(3) << "Processing time: " << times << 's' << endl << endl;
 		log_file << fixed << setprecision(3) << "Processing time: " << times << 's' << endl << endl;
 
@@ -1354,6 +1519,7 @@ int main()
 		cout << "	1: Delete a pair" << endl;
 		cout << "	2: Search" << endl;
 		cout << "	3: Build from list" << endl;
+		cout << "	4: Delete a file" << endl;
 		cout << "	8: Set N and L" << endl;
 		cout << "	9: Setup system" << endl;
 		cout << "	Ctrl + Z: Exit" << endl;
