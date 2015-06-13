@@ -366,7 +366,7 @@ int find_l_star(byte *level_key, int level_key_length, byte *esk, int esk_length
 		hkey = HMAC_SHA_256((byte*)token.c_str(), token.size(), hkey); // output data for creating hash table
 
 		hex = hex_encoder(hkey); // output for hash table
-		T_path = "./Server/T_" + to_string(search_level) + "[" + hex + "]"; // rename means not empty
+		T_path = "./Server/T_" + to_string(search_level) + "_" + hex; // rename means not empty
 		cout << "Try to find: " << T_path << endl;
 
 		dec_status = dec_T_to_gamma(esk, esk_length, T_path, &T, &gamma);
@@ -382,6 +382,48 @@ int find_l_star(byte *level_key, int level_key_length, byte *esk, int esk_length
 	cout << "Result: " << gamma.l_star << endl;
 	cout << "****  Find l* end ****" << endl;
 	return gamma.l_star; // not found
+}
+
+int compute_l_star(int id, string w)
+{
+	string comp, buf;
+	int order = 0, temp;
+
+	fstream update_history;
+	update_history.open("./Client/Update_History", ios::in);
+	if (!update_history)
+	{
+		cerr << "Error: open update history error!" << endl;
+	}
+
+	comp = to_string(id) + " " + w + " " + '0';
+
+	while (comp != buf)
+	{
+		getline(update_history, buf);
+		order++;
+		if (update_history.eof())
+		{
+			order = -1;
+			break;
+		}
+	}
+	if (order == -1)
+	{
+		return -1;
+	}
+
+	while (1)
+	{
+		temp = log2(order);
+		order = order - pow(2, temp);
+		if (order == 0)
+		{
+			break;
+		}
+	}
+
+	return temp;
 }
 
 int dec_T_to_gamma(byte *esk, int esk_length, string T_path, struct encoded_data *T, struct unencoded_data *gamma) // decrypt c2 of a encoded data structure T and store to a unencoded data structure gamma
@@ -446,6 +488,12 @@ class PDSE
 
 		int update(string keyword, int id, int op) // execute successfully return 0, server full return -1
 		{
+			fstream log_file;
+			string log_path = "./Update_log.txt";
+			log_file.open(log_path, ios::out | ios::app);
+			if (!log_file)
+				cerr << "Error: create log file " << log_path << " failed..." << endl;
+
 			int free_level = -1;
 			fstream file_T;
 			string T_path;
@@ -457,6 +505,7 @@ class PDSE
 			{
 				T_path = "./Server/T_" + to_string(i) + "[" + to_string(0) + "]"; // check the first entry for each level
 				//cout << "Try to find empty entry: " << T_path << endl;
+				log_file << "Try to find empty entry: " << T_path << endl;
 				file_T.open(T_path, ios::in | ios::binary); // Can open the file means free because encode_entry() will rename the level files
 				if (!file_T)
 				{
@@ -466,6 +515,7 @@ class PDSE
 				else
 				{
 					//cout << "Level " << i << " is free!" << endl;
+					log_file << "Level " << i << " is free!" << endl;
 					free_level = i;
 					file_T.close();
 					break;
@@ -619,7 +669,7 @@ class PDSE
 		void server_setup_single()
 		{
 			fstream log_file;
-			string log_path = "./setup_setup_log.txt";
+			string log_path = "./server_setup_log.txt";
 			log_file.open(log_path, ios::out | ios::app);
 			if (!log_file)
 				cerr << "Error: create log file " << log_path << " failed..." << endl;
@@ -822,7 +872,7 @@ class PDSE
 			hkey = HMAC_SHA_256((byte*)token_l.c_str(), token_l.size(), hkey);
 
 			hex = hex_encoder(hkey);
-			lookup_path = "./Server/T_" + to_string(level) + "[" + hex + "]";
+			lookup_path = "./Server/T_" + to_string(level) + "_" + hex;
 			//cout << "Open " << lookup_path << endl;
 			T_file.open(lookup_path, ios::in | ios::binary);
 			if (!T_file)
@@ -856,6 +906,12 @@ class PDSE
 
 		void encode_entry(int level, int index, string w, int id, int op, int cnt) // w: keyword, index: for a level
 		{
+			fstream log_file;
+			string log_path = "./client_encode_entry_log.txt";
+			log_file.open(log_path, ios::out | ios::app);
+			if (!log_file)
+				cerr << "Error: create log file " << log_path << " failed..." << endl;
+			
 			//cout << "**** Encode entry store to index " << index << " of the level " << level <<" ****" << endl;
 
 			struct unencoded_data gamma; // create a unencoded data structure to save the document-keyword pair
@@ -883,6 +939,7 @@ class PDSE
 				if (gamma.l_star == -1) // not found "add" in server
 				{
 					cerr << "Erroe: cannot delete because the corrsponding document-keyword pair is not added" << endl;
+					log_file << "Erroe: cannot delete because the corrsponding document-keyword pair is not added" << endl;
 					return;
 				}
 			}
@@ -905,7 +962,7 @@ class PDSE
 			string hkey = HMAC_SHA_256((byte*)token.c_str(), token.size(), buf); // output data for creating hash table
 
 			string hex = hex_encoder(hkey); // output for hash table
-			new_name = "./Server/T_" +to_string(level) + "[" + hex + "]"; // rename means not empty
+			new_name = "./Server/T_" +to_string(level) + "_" + hex; // rename means not empty
 						
 			string c1; // output data, including l* and file ID, server can decrypt by token
 			c1.assign((char*)&gamma.l_star, sizeof(gamma.l_star)); // 4 bytes
@@ -932,10 +989,14 @@ class PDSE
 
 			T_path = "./Server/T_" + to_string(level) + "[" +  to_string(index) + "]";
 			//cout << "Open: " << T_path << endl;
+			log_file << "Open: " << T_path << endl;
 			file_T.open(T_path, ios::out | ios::in | ios::binary);
 			if (!file_T)
 			{
-				cerr << "Error: open " << T_path << " failed..." << endl;
+				cerr << "Error: open " << T_path << " failed... on encode_entry" << endl;
+				cerr << "	Error: " << strerror(errno) << endl;
+				log_file << "Error: open " << T_path << " failed... on encode_entry" << endl;
+				log_file << "	Error: " << strerror(errno) << endl;
 			}
 			else
 			{
@@ -945,10 +1006,14 @@ class PDSE
 				file_T.close();
 				
 				//cout << "Rename " << T_path << " to " << new_name << endl;
+				log_file << "Rename " << T_path << " to " << new_name << endl;
 				int result = rename(T_path.c_str(), new_name.c_str());
 				if (result != 0)
 				{
-					cerr << "Error: rename " << T_path << " to " << new_name << endl;
+					cerr << "Error: rename " << T_path << " to " << new_name << " on encode_entry" << endl;
+					cerr << "	Error: " << strerror(errno) << endl;
+					log_file << "Error: rename " << T_path << " to " << new_name << " on encode_entry" << endl;
+					log_file << "	Error: " << strerror(errno) << endl;
 				}
 			}
 
@@ -972,10 +1037,18 @@ class PDSE
 			cout << "l* = " << C1.l_star << endl;
 			cout << "id = " << C1.id << endl;
 			*/
+			log_file.close();
 		}
 
 		void simple_rebuild(int level, string keyword, int id, int op)
 		{
+			fstream log_file;
+			string log_path = "./client_simple_rebuild_log.txt";
+			log_file.open(log_path, ios::out | ios::app);
+			if (!log_file)
+				cerr << "Error: create log file " << log_path << " failed..." << endl;
+
+
 			string T_path;
 			
 			string dir_path = "./Server/";
@@ -993,7 +1066,9 @@ class PDSE
 			vector<struct unencoded_data> gamma_v;
 			string recoved_string, temp_c2, temp_keyword;
 
-			int level_index = 0; // the index for each lvele 
+			int level_index = 0; // the index for each lvele
+
+			int result;
 
 			memset(&gamma, 0, sizeof(struct unencoded_data));
 
@@ -1002,12 +1077,16 @@ class PDSE
 				gamma.l_star = level;
 			else if (op == 1)
 			{
-				for (int i = 0; i <= L; i++) // search ALL level
+				/*for (int i = 0; i <= L; i++) // search ALL level
 				{
 					gamma.l_star = find_l_star(k[i], KEY_LENGTH, esk, KEY_LENGTH, i, keyword, id); // for client when op = del
 					if (gamma.l_star != -1)
 						break;
-				}
+				}*/
+
+				gamma.l_star = compute_l_star(id, keyword);
+
+				cout << "l* = " << gamma.l_star << endl;
 
 				if (gamma.l_star == -1)
 				{
@@ -1035,7 +1114,7 @@ class PDSE
 				{
 					//cout << "Download encoded entry in level " << i << endl;
 					//compare_name = "T_" + to_string(i); // old
-					compare_name = "T_" + to_string(i) + "["; // new version
+					compare_name = "T_" + to_string(i) + "_"; // new version
 					level_index = 0;
 					
 					while (ep = readdir(dp))
@@ -1046,14 +1125,27 @@ class PDSE
 							//printf("File: %s\n", ep->d_name); // file name
 							T_path = dir_path + ep->d_name;
 							//cout << "Open: " << T_path << endl;
+							log_file << "Open: " << T_path << endl;
 
 							if (dec_T_to_gamma(esk, KEY_LENGTH, T_path, &T, &gamma) == 0) // decrypt encoded data successfully and store to unencoded data structure gamma
 							{
 								//free_name = dir_path + "/" + compare_name + "[" + to_string(level_index) + "]"; // old
-								free_name = dir_path + compare_name + to_string(level_index) + "]"; //new version
-								rename(T_path.c_str(), free_name.c_str()); // free the file by rename to origional name
+								free_name = dir_path + "T_" + to_string(i) + "[" + to_string(level_index) + "]"; //new version
+								result = rename(T_path.c_str(), free_name.c_str()); // free the file by rename to origional name
+								if (result != 0)
+								{
+									cerr << "Error: rename " << T_path << " to " << free_name << " on encode_entry" << endl;
+									cerr << "	Error: " << strerror(errno) << endl;
+									log_file << "Error: rename " << T_path << " to " << free_name << " on encode_entry" << endl;
+									log_file << "	Error: " << strerror(errno) << endl;
+								}
 								
 								level_index++; // for read next level
+							}
+							else
+							{
+								cerr << "Error: decrytpion" << endl;
+								log_file << "Error: decrytpion" << endl;
 							}
 							gamma_v.push_back(gamma);
 						}
@@ -1148,8 +1240,10 @@ class PDSE
 				}
 				/* Upload each entry to server */
 			}
+			log_file.close();
 		}
 
+		/*
 		void process_level()
 		{
 
@@ -1164,12 +1258,20 @@ class PDSE
 		{
 
 		}
+		*/
 };
 
 int main()
 {
 	fstream log_file;
 	log_file.open("./PDSE_Log_.txt", ios::out);
+
+	fstream update_history;
+	update_history.open("./Client/Update_History", ios::out | ios::app);
+	if (!update_history)
+	{
+		cerr << "Error: open update history error!" << endl;
+	}
 
 	LARGE_INTEGER startTime, endTime, fre;
 	double times;
@@ -1213,7 +1315,10 @@ int main()
 				if (keyword.size() > MAX_KEYWORD_LENGTH)
 					cerr << "The maximum length for a keyword cannot more than 32 bytes" << endl;
 				else
+				{
 					pdse_obj.update(keyword, file_ID, update_op);
+					update_history << file_ID << " " << keyword << " " << update_op << endl;
+				}
 				
 				break;
 
@@ -1226,7 +1331,10 @@ int main()
 				if (keyword.size() > MAX_KEYWORD_LENGTH)
 					cerr << "The maximum length for a keyword cannot more than 32 bytes" << endl;
 				else
+				{
 					pdse_obj.update(keyword, file_ID, update_op);
+					update_history << file_ID << " " << keyword << " " << update_op << endl;
+				}
 
 				break;
 
@@ -1338,6 +1446,7 @@ int main()
 										{
 											update_op = 0; // add
 											pdse_obj.update(keyword, ID, update_op);
+											update_history << file_ID << " " << keyword << " " << update_op << endl;
 										}
 										else
 										{
@@ -1526,6 +1635,7 @@ int main()
 		cout << ">>";
 	}
 	log_file.close();
+	update_history.close();
 	system("PAUSE");
 	return 0;
 }
